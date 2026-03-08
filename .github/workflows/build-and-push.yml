@@ -1,4 +1,4 @@
-name: Build and Push to ACR
+name: Build and Push Container Image
 
 on:
   push:
@@ -23,6 +23,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # --- Method 2: Generate OCI labels for Code-to-Runtime mapping ---
+      - name: Generate OCI metadata labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.version=${{ env.IMAGE_VERSION }}
+
+      # --- Login to ACR ---
       - name: Log in to Azure Container Registry
         uses: docker/login-action@v3
         with:
@@ -30,16 +50,17 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      # --- Build and push with OCI labels (Method 2) ---
       - name: Build and push Docker image
         id: push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
+      # --- Method 3: GitHub Attestation for provenance ---
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
@@ -47,5 +68,11 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      - name: Image digest
-        run: echo "Image pushed successfully to ${{ env.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}"
+      - name: Summary
+        run: |
+          echo "### Container Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** ${{ env.ACR_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **OCI Labels:** Applied (Method 2 - C2C mapping)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Attestation:** Generated (Method 3 - provenance)" >> $GITHUB_STEP_SUMMARY

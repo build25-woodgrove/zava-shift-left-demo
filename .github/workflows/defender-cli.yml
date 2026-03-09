@@ -10,12 +10,20 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  IMAGE_NAME: shift-left-demo
+
 jobs:
   defender-cli-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # Build the image locally for scanning (don't push)
+      - name: Build Docker image for scanning
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:scan .
 
       # Install the new Defender CLI from CDN
       - name: Download Defender CLI
@@ -27,10 +35,10 @@ jobs:
           chmod +x defender
           echo "$(pwd)" >> $GITHUB_PATH
 
-      # Run all scanners using the new Defender CLI
-      - name: Run Defender CLI scan
+      # Scan the container image using the correct command
+      - name: Scan container image with Defender CLI
         run: |
-          defender run
+          defender scan image ${{ env.IMAGE_NAME }}:scan
         env:
           # OIDC token is automatically available via GitHub Actions
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}

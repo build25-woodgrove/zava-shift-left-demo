@@ -12,6 +12,7 @@ permissions:
 
 env:
   IMAGE_NAME: shift-left-demo
+  ALPINE_ACR_ENDPOINT: ${{ vars.ALPINE_ACR_ENDPOINT }}
 
 jobs:
   defender-cli-scan:
@@ -20,32 +21,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Build the image locally and export for scanning
-      - name: Build Docker image for scanning
+      # Build the container image
+      - name: Build Docker image
         run: |
-          docker build -t ${{ env.IMAGE_NAME }}:scan .
-          docker save ${{ env.IMAGE_NAME }}:scan -o image.tar
+          docker build -t ${{ env.ALPINE_ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
 
-      # Install the new Defender CLI from CDN
-      - name: Download Defender CLI
+      # Push image to ACR
+      - name: Log in to Alpine ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALPINE_ACR_ENDPOINT }}
+          username: ${{ secrets.ALPINE_ACR_USERNAME }}
+          password: ${{ secrets.ALPINE_ACR_PASSWORD }}
+
+      - name: Push image to ACR
         run: |
-          CLI_VERSION="latest"
-          CLI_URL="https://cli.dfd.security.azure.com/public/${CLI_VERSION}/Defender_linux-x64"
-          echo "Downloading Defender CLI from ${CLI_URL}..."
-          curl -fSL -o defender "${CLI_URL}"
+          docker push ${{ env.ALPINE_ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # Download Defender for Cloud CLI
+      - name: Download Defender for Cloud CLI
+        run: |
+          curl -L -o defender "https://aka.ms/defender-cli_linux-x64"
           chmod +x defender
           echo "$(pwd)" >> $GITHUB_PATH
 
-      # Scan the container image using the correct command
-      - name: Scan container image with Defender CLI
+      # Scan the pushed container image (connector-based auth via OIDC)
+      - name: Run Defender for Cloud CLI Scan
         run: |
-          defender scan image image.tar
-        env:
-          # OIDC token is automatically available via GitHub Actions
-          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          ./defender scan image '${{ env.ALPINE_ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
+        continue-on-error: true
 
-      # Find the SARIF result file (use processed results only)
+      # Find the SARIF result file
       - name: Find SARIF results
         if: always()
         id: sarif

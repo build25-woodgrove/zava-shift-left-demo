@@ -20,10 +20,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Build the image locally for scanning (don't push)
+      # Build the image locally and export for scanning
       - name: Build Docker image for scanning
         run: |
           docker build -t ${{ env.IMAGE_NAME }}:scan .
+          docker save ${{ env.IMAGE_NAME }}:scan -o image.tar
 
       # Install the new Defender CLI from CDN
       - name: Download Defender CLI
@@ -38,15 +39,25 @@ jobs:
       # Scan the container image using the correct command
       - name: Scan container image with Defender CLI
         run: |
-          defender scan image ${{ env.IMAGE_NAME }}:scan
+          defender scan image image.tar
         env:
           # OIDC token is automatically available via GitHub Actions
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
 
+      # Find the SARIF result file (use processed results only)
+      - name: Find SARIF results
+        if: always()
+        id: sarif
+        run: |
+          SARIF_FILE=$(find .gdn -path '*/.r/mdvm/*/mdvm.sarif' -type f | head -1)
+          echo "sarif_file=${SARIF_FILE}" >> $GITHUB_OUTPUT
+          echo "Found SARIF: ${SARIF_FILE}"
+
       # Upload SARIF results to GitHub Security tab
       - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && steps.sarif.outputs.sarif_file != ''
         with:
-          sarif_file: .gdn/
+          sarif_file: ${{ steps.sarif.outputs.sarif_file }}
+          category: defender-cli-image-scan

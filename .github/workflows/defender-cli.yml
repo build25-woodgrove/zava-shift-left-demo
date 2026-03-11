@@ -11,8 +11,13 @@ permissions:
   security-events: write
 
 env:
-  IMAGE_NAME: shift-left-demo
+  IMAGE_NAME: woodgrove-northwind
   ALPINE_ACR_ENDPOINT: ${{ vars.ALPINE_ACR_ENDPOINT }}
+  ACRGATED_ACR_ENDPOINT: ${{ vars.ACRGATED_ACR_ENDPOINT }}
+  AIAGENTDEMO_ACR_ENDPOINT: aiagentdemo-anh2evbtdybbffgr.azurecr.io
+  ALPINEACR2_ACR_ENDPOINT: alpineacr2.azurecr.io
+  P4AISAMPLE_ACR_ENDPOINT: p4aisampleacr3wz76o5tfmbes.azurecr.io
+  SLDEMOACR_ACR_ENDPOINT: sldemoacr.azurecr.io
 
 jobs:
   defender-cli-scan:
@@ -24,9 +29,26 @@ jobs:
       # Build the container image
       - name: Build Docker image
         run: |
-          docker build -t ${{ env.ALPINE_ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+        env:
+          DOCKER_BUILDKIT: "0"
 
-      # Push image to ACR
+      # Tag for all registries
+      - name: Tag images for all registries
+        run: |
+          REGISTRIES=(
+            "${{ env.ALPINE_ACR_ENDPOINT }}"
+            "${{ env.ACRGATED_ACR_ENDPOINT }}"
+            "${{ env.AIAGENTDEMO_ACR_ENDPOINT }}"
+            "${{ env.ALPINEACR2_ACR_ENDPOINT }}"
+            "${{ env.P4AISAMPLE_ACR_ENDPOINT }}"
+            "${{ env.SLDEMOACR_ACR_ENDPOINT }}"
+          )
+          for reg in "${REGISTRIES[@]}"; do
+            docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} "${reg}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          done
+
+      # Login to all ACR registries
       - name: Log in to Alpine ACR
         uses: docker/login-action@v3
         with:
@@ -34,9 +56,57 @@ jobs:
           username: ${{ secrets.ALPINE_ACR_USERNAME }}
           password: ${{ secrets.ALPINE_ACR_PASSWORD }}
 
-      - name: Push image to ACR
+      - name: Log in to Acrgated ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACRGATED_ACR_ENDPOINT }}
+          username: ${{ secrets.ACRGATED_ACR_USERNAME }}
+          password: ${{ secrets.ACRGATED_ACR_PASSWORD }}
+
+      - name: Log in to AI Agent Demo ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.AIAGENTDEMO_ACR_ENDPOINT }}
+          username: ${{ secrets.AIAGENTDEMO_ACR_USERNAME }}
+          password: ${{ secrets.AIAGENTDEMO_ACR_PASSWORD }}
+
+      - name: Log in to Alpine ACR 2
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALPINEACR2_ACR_ENDPOINT }}
+          username: ${{ secrets.ALPINEACR2_ACR_USERNAME }}
+          password: ${{ secrets.ALPINEACR2_ACR_PASSWORD }}
+
+      - name: Log in to P4AI Sample ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.P4AISAMPLE_ACR_ENDPOINT }}
+          username: ${{ secrets.P4AISAMPLE_ACR_USERNAME }}
+          password: ${{ secrets.P4AISAMPLE_ACR_PASSWORD }}
+
+      - name: Log in to SL Demo ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.SLDEMOACR_ACR_ENDPOINT }}
+          username: ${{ secrets.SLDEMOACR_ACR_USERNAME }}
+          password: ${{ secrets.SLDEMOACR_ACR_PASSWORD }}
+
+      # Push to all registries
+      - name: Push to all ACR registries
         run: |
-          docker push ${{ env.ALPINE_ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          REGISTRIES=(
+            "${{ env.ALPINE_ACR_ENDPOINT }}"
+            "${{ env.ACRGATED_ACR_ENDPOINT }}"
+            "${{ env.AIAGENTDEMO_ACR_ENDPOINT }}"
+            "${{ env.ALPINEACR2_ACR_ENDPOINT }}"
+            "${{ env.P4AISAMPLE_ACR_ENDPOINT }}"
+            "${{ env.SLDEMOACR_ACR_ENDPOINT }}"
+          )
+          for reg in "${REGISTRIES[@]}"; do
+            echo "::group::Pushing to ${reg}"
+            docker push "${reg}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+            echo "::endgroup::"
+          done
 
       # Download Defender for Cloud CLI
       - name: Download Defender for Cloud CLI
@@ -67,3 +137,11 @@ jobs:
         with:
           sarif_file: ${{ steps.sarif.outputs.sarif_file }}
           category: defender-cli-image-scan
+
+      # Container mapping for pipeline discovery in MDC
+      - name: Run Microsoft Security DevOps (container-mapping)
+        if: always()
+        uses: microsoft/security-devops-action@latest
+        id: msdo
+        with:
+          tools: container-mapping
